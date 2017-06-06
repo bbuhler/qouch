@@ -8,9 +8,16 @@ Qouch.QouchRequestError = QouchRequestError;
 Qouch.QouchBulkError = QouchBulkError;
 
 function Qouch( url, httpAgent ) {
-  this.url = url;
-  this.serverURL = url.match(/^.*\/(?=[^/]+\/?$)/)[ 0 ];
+  const auth = URL.parse(url).auth;
+  url = new URL.URL(url);
+
+  this.url = URL.format(url, { auth: false });
+  this.serverURL = this.url.match(/^.*\/(?=[^/]+\/?$)/)[ 0 ];
   this.httpAgent = httpAgent || http.globalAgent;
+
+  if (auth) {
+    this.auth = 'Basic ' + new Buffer(auth).toString('base64');
+  }
 }
 
 Qouch.prototype.createDB = function() {
@@ -22,28 +29,46 @@ Qouch.prototype.deleteDB = function() {
 };
 
 Qouch.prototype.activeTasks = function () {
-  return http.read({
+  var opts = {
     url: this.serverURL + '_active_tasks',
     agent: this.httpAgent
-  })
+  };
+
+  if (this.auth) {
+    opts.headers = { authorization: this.auth };
+  }
+
+  return http.read(opts)
   .then(JSON.parse.bind(JSON));
 };
 
 Qouch.prototype.seq = function () {
-  return http.read({
+  var opts = {
     url: this.url,
-    agent: this.httpAgent
-  })
+    agent: this.httpAgent,
+  };
+
+  if (this.auth) {
+    opts.headers = { authorization: this.auth };
+  }
+
+  return http.read(opts)
   .then(function(body) {
     return JSON.parse(body).update_seq;
   });
 };
 
 Qouch.prototype.get = function(_id) {
-  return http.read({
+  var opts = {
     url: format('%s/%s', this.url, _id),
     agent: this.httpAgent
-  })
+  };
+
+  if (this.auth) {
+    opts.headers = { authorization: this.auth };
+  }
+
+  return http.read(opts)
   .then(function(body) {
     return JSON.parse(body);
   });
@@ -85,7 +110,7 @@ Qouch.prototype.update = function(doc) {
 Qouch.prototype.destroy = function(doc) {
   var clone = JSON.parse(JSON.stringify(doc));
   clone._deleted = true;
-  
+
   return this.request('PUT', doc._id, clone)
   .then(function(body) {
     return { _rev: body.rev, _deleted: true };
@@ -176,6 +201,11 @@ Qouch.prototype.request = function(method, path, body) {
     },
     agent: this.httpAgent
   };
+
+  if (this.auth) {
+    opts.headers.authorization = this.auth;
+  }
+
   if (body) opts.body = [ JSON.stringify(body) ];
 
   return http.request(opts)
